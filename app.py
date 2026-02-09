@@ -70,44 +70,43 @@ def index():
             bg_path = os.path.join(UPLOAD_FOLDER, bg_filename)
             background_file.save(bg_path)
 
-        # Build filters
+        # Video filters
         vf_filters = []
-
         if ratio != "Original":
             vf_filters.append(f"crop={int(cropW)}:{int(cropH)}:{int(cropX)}:{int(cropY)}")
         if zoom_multiplier > 1.0:
             vf_filters.append(f"scale=iw*{zoom_multiplier}:ih*{zoom_multiplier},crop=iw:ih")
         if filter_ffmpeg:
             vf_filters.append(filter_ffmpeg)
-
         full_vf = ",".join(vf_filters) if vf_filters else None
-        af_filter = "silenceremove=start_periods=1:start_threshold=-30dB:start_silence=0.5:stop_threshold=-30dB:stop_silence=0.5" if cut_silence else None
+
+        # Audio filter for silence removal
+        af_filter = None
+        if cut_silence:
+            # stop_periods=-1 removes all silent sections
+            af_filter = "silenceremove=start_periods=1:start_threshold=-35dB:start_silence=0.5:stop_periods=-1:stop_threshold=-35dB:stop_silence=0.5"
 
         output_filename = f"processed_{filename}"
         output_path = os.path.join(UPLOAD_FOLDER, output_filename)
 
-        
-
         # Build FFmpeg command
-        cmd = ["ffmpeg"]
+        cmd = ["ffmpeg", "-i", input_path]
+
         if green_screen and bg_path:
-            cmd += [
-                "-i", bg_path,
-                "-i", input_path,
-                "-filter_complex",
-                f"[1:v]chromakey=0x00FF00:0.3:0.1[fg];[0:v][fg]overlay=format=yuv420"
-            ]
+            cmd = ["ffmpeg", "-i", bg_path, "-i", input_path,
+                   "-filter_complex",
+                   f"[1:v]chromakey=0x00FF00:0.3:0.1[fg];[0:v][fg]overlay=format=yuv420"]
             if af_filter:
                 cmd += ["-af", af_filter]
-            cmd += ["-c:a", "aac", output_path, "-y"]
+            cmd += ["-c:v", "libx264", "-c:a", "aac", output_path, "-y"]
         else:
-            cmd += ["-i", input_path]
             if full_vf:
                 cmd += ["-vf", full_vf]
             if af_filter:
                 cmd += ["-af", af_filter]
-            cmd += ["-c:a", "aac", output_path, "-y"]
+            cmd += ["-c:v", "libx264", "-c:a", "aac", output_path, "-y"]
 
+        # Run FFmpeg
         subprocess.run(cmd, check=True)
         return send_file(output_path, as_attachment=True)
 
