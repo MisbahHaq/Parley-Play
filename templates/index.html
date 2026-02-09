@@ -1,0 +1,208 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Video Cropper with Filters, Zoom & Green Screen</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        margin-top: 20px;
+      }
+      input,
+      select,
+      button {
+        padding: 10px;
+        margin: 10px;
+        font-size: 16px;
+      }
+      select {
+        width: 450px;
+      }
+      #videoContainer {
+        position: relative;
+        display: inline-block;
+      }
+      #videoPreview {
+        max-width: 800px;
+        max-height: 450px;
+      }
+      #cropBox {
+        position: absolute;
+        border: 3px dashed #ff0000;
+        cursor: move;
+        box-sizing: border-box;
+        background: rgba(255, 0, 0, 0.1);
+      }
+      #cropBox::after {
+        content: "";
+        position: absolute;
+        width: 15px;
+        height: 15px;
+        background: #ff0000;
+        right: 0;
+        bottom: 0;
+        cursor: se-resize;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Video Cropper with Filters, Zoom & Green Screen</h1>
+    <form method="POST" enctype="multipart/form-data">
+      <input
+        type="file"
+        id="videoFile"
+        name="video"
+        accept="video/*"
+        required
+      /><br />
+
+      <label>Aspect Ratio:</label><br />
+      <select name="ratio" id="ratioSelect" required>
+        {% for r, desc in ratios.items() %}
+        <option value="{{ r }}">{{ r }} — {{ desc }}</option>
+        {% endfor %}</select
+      ><br />
+
+      <label>Filter:</label><br />
+      <select name="filter">
+        {% for f in filters.keys() %}
+        <option value="{{ f }}">{{ f }}</option>
+        {% endfor %}</select
+      ><br />
+
+      <label>Zoom Effect:</label><br />
+      <select name="zoom">
+        {% for z in zooms.keys() %}
+        <option value="{{ z }}">{{ z }}</option>
+        {% endfor %}</select
+      ><br />
+
+      <label>Green Screen Replacement:</label><br />
+      <input type="checkbox" name="greenscreen" /> Remove Green Background<br />
+      <input type="file" name="background" accept="image/*,video/*" /><br />
+
+      <input type="hidden" id="cropX" name="cropX" />
+      <input type="hidden" id="cropY" name="cropY" />
+      <input type="hidden" id="cropW" name="cropW" />
+      <input type="hidden" id="cropH" name="cropH" />
+
+      <button type="submit">Process Video</button>
+    </form>
+
+    <div id="videoContainer">
+      <video id="videoPreview" controls></video>
+      <div id="cropBox"></div>
+    </div>
+
+    <script>
+      const videoFile = document.getElementById("videoFile");
+      const videoPreview = document.getElementById("videoPreview");
+      const cropBox = document.getElementById("cropBox");
+      const ratioSelect = document.getElementById("ratioSelect");
+
+      let startX, startY, startWidth, startHeight;
+      let isDragging = false,
+        isResizing = false;
+
+      function setCropBoxSize() {
+        const ratio = ratioSelect.value.split(":").map(Number);
+        const maxWidth = videoPreview.offsetWidth * 0.8;
+        const maxHeight = videoPreview.offsetHeight * 0.8;
+
+        let boxWidth = maxWidth;
+        let boxHeight = (ratio[1] / ratio[0]) * boxWidth;
+
+        if (boxHeight > maxHeight) {
+          boxHeight = maxHeight;
+          boxWidth = (ratio[0] / ratio[1]) * boxHeight;
+        }
+
+        cropBox.style.width = boxWidth + "px";
+        cropBox.style.height = boxHeight + "px";
+        cropBox.style.left = "10px";
+        cropBox.style.top = "10px";
+      }
+
+      videoFile.addEventListener("change", () => {
+        const file = videoFile.files[0];
+        if (file) videoPreview.src = URL.createObjectURL(file);
+      });
+
+      videoPreview.addEventListener("loadedmetadata", setCropBoxSize);
+      ratioSelect.addEventListener("change", setCropBoxSize);
+
+      // Drag & Resize
+      cropBox.addEventListener("mousedown", (e) => {
+        const rect = cropBox.getBoundingClientRect();
+        if (e.offsetX > rect.width - 20 && e.offsetY > rect.height - 20) {
+          isResizing = true;
+          startWidth = rect.width;
+          startHeight = rect.height;
+        } else {
+          isDragging = true;
+          startX = e.clientX - cropBox.offsetLeft;
+          startY = e.clientY - cropBox.offsetTop;
+        }
+      });
+
+      document.addEventListener("mousemove", (e) => {
+        if (isDragging) {
+          let newX = e.clientX - startX;
+          let newY = e.clientY - startY;
+          newX = Math.max(
+            0,
+            Math.min(videoPreview.offsetWidth - cropBox.offsetWidth, newX),
+          );
+          newY = Math.max(
+            0,
+            Math.min(videoPreview.offsetHeight - cropBox.offsetHeight, newY),
+          );
+          cropBox.style.left = newX + "px";
+          cropBox.style.top = newY + "px";
+        } else if (isResizing) {
+          const ratio = ratioSelect.value.split(":").map(Number);
+          let newWidth = e.clientX - cropBox.offsetLeft;
+          let newHeight = (ratio[1] / ratio[0]) * newWidth;
+
+          if (cropBox.offsetTop + newHeight > videoPreview.offsetHeight) {
+            newHeight = videoPreview.offsetHeight - cropBox.offsetTop;
+            newWidth = (ratio[0] / ratio[1]) * newHeight;
+          }
+          if (cropBox.offsetLeft + newWidth > videoPreview.offsetWidth) {
+            newWidth = videoPreview.offsetWidth - cropBox.offsetLeft;
+            newHeight = (ratio[1] / ratio[0]) * newWidth;
+          }
+
+          cropBox.style.width = newWidth + "px";
+          cropBox.style.height = newHeight + "px";
+        }
+      });
+
+      document.addEventListener("mouseup", () => {
+        isDragging = false;
+        isResizing = false;
+      });
+
+      // Submit: convert to pixel coordinates based on natural video size
+      document.querySelector("form").addEventListener("submit", () => {
+        const rect = cropBox.getBoundingClientRect();
+        const videoRect = videoPreview.getBoundingClientRect();
+
+        // compute scaling factors for width and height
+        const scaleX = videoPreview.videoWidth / videoRect.width;
+        const scaleY = videoPreview.videoHeight / videoRect.height;
+
+        // crop coordinates relative to video frame
+        const cropLeft = (rect.left - videoRect.left) * scaleX;
+        const cropTop = (rect.top - videoRect.top) * scaleY;
+        const cropWidth = rect.width * scaleX;
+        const cropHeight = rect.height * scaleY;
+
+        document.getElementById("cropX").value = Math.round(cropLeft);
+        document.getElementById("cropY").value = Math.round(cropTop);
+        document.getElementById("cropW").value = Math.round(cropWidth);
+        document.getElementById("cropH").value = Math.round(cropHeight);
+      });
+    </script>
+  </body>
+</html>
